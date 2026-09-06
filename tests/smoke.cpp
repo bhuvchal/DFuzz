@@ -4,6 +4,7 @@
 #include "dfuzz/kernels.h"
 #include "dfuzz/reference.h"
 #include "dfuzz/bound.h"
+#include "dfuzz/buildinfo.h"
 #include <cstdio>
 #include <random>
 #include <vector>
@@ -11,6 +12,8 @@
 using namespace dfuzz;
 
 int main() {
+    print_build_config();
+    std::printf("\n");
     const int nblocks = 4;
     const int n = nblocks * QK_K;
 
