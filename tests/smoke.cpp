@@ -5,6 +5,7 @@
 #include "dfuzz/reference.h"
 #include "dfuzz/bound.h"
 #include "dfuzz/buildinfo.h"
+#include "dfuzz/init.h"
 #include <cstdio>
 #include <random>
 #include <vector>
@@ -12,6 +13,7 @@
 using namespace dfuzz;
 
 int main() {
+    dfuzz::Guard guard;   // ggml lookup tables must be live before any kernel call
     print_build_config();
     std::printf("\n");
     const int nblocks = 4;

@@ -12,6 +12,7 @@
 #include "dfuzz/kernels.h"
 #include "dfuzz/reference.h"
 #include "dfuzz/buildinfo.h"
+#include "dfuzz/init.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -110,6 +111,7 @@ std::vector<float> make_input(const char* kind, int n, std::mt19937& rng) {
 } // namespace
 
 int main() {
+    dfuzz::Guard guard;   // ggml lookup tables must be live before any kernel call
     print_build_config();
     std::printf("\n# dequantization validation (must be bit-exact vs ggml)\n");
 
