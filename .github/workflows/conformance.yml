@@ -96,6 +96,14 @@ jobs:
 
       # Diagnostic for the x86 avx2 gemm divergence: same packed weights fed
       # to gemm-simd, gemm-generic and gemv, so the three can be separated.
+      # Fingerprint of the generation path. If two platforms print different
+      # hashes, a seed does not denote the same input and every cross-path
+      # result is meaningless.
+      - name: generation fingerprint
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: ./build/diag_gen
+
       - name: gemm diagnostic
         if: steps.cpu.outputs.supported == 'yes'
         continue-on-error: true
