@@ -35,7 +35,7 @@ add_executable(dfuzz_sweep src/sweep.cpp)
 target_link_libraries(dfuzz_sweep PRIVATE dfuzz_core)
 
 enable_testing()
-foreach(t smoke smoke_fp4 dequant_check dequant_fp4 shrink_test bench_oracle)
+foreach(t smoke smoke_fp4 dequant_check dequant_fp4 shrink_test bound_sensitivity bench_oracle)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE dfuzz_core)
   if(NOT ${t} STREQUAL bench_oracle)

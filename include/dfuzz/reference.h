@@ -34,10 +34,27 @@ void dequantize_q8_K(const void* vy, int nblocks, std::vector<double>& out);
 // --- fp64 reference -------------------------------------------------------
 struct RefResult {
     double dot;      // exact-as-practical dot product in fp64
-    double abs_sum;  // sum |x_i * y_i| -- drives the error bound
+    double abs_sum;  // sum |x_i * y_i|
+    // Magnitude of the largest intermediate the kernel actually forms.
+    //
+    // sum|x_i y_i| bounds the error only when the kernel's intermediates are
+    // no larger than the terms themselves. For q4_K that is false: the kernel
+    // computes a scaled positive partial sum and subtracts a (dmin * min)
+    // offset, both far larger than the final result, and both rounded in fp32.
+    // Measured on failing cases, the offset term ran 30-60x sum|x_i y_i|.
+    //
+    // Bounding against this instead of abs_sum is what makes the predicate
+    // correct for offset-carrying formats rather than merely tuned.
+    double intermediate_mag = 0.0;
 };
 
 // Straight serial fp64 accumulation over exactly-dequantized values.
 RefResult reference_dot(const std::vector<double>& x, const std::vector<double>& y);
+
+// As reference_dot, but also records the peak sub-block partial sum, which is
+// the magnitude the kernel's fp32 roundings actually act on.
+RefResult reference_dot_blocked(const std::vector<double>& x,
+                                const std::vector<double>& y,
+                                int sub_block);
 
 } // namespace dfuzz

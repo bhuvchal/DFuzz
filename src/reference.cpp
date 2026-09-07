@@ -1,4 +1,5 @@
 #include "dfuzz/reference.h"
+#include <algorithm>
 #include <cstring>
 
 namespace dfuzz {
@@ -96,13 +97,43 @@ void dequantize_q8_K(const void* vy, int nblocks, std::vector<double>& out) {
 }
 
 RefResult reference_dot(const std::vector<double>& x, const std::vector<double>& y) {
-    RefResult r{0.0, 0.0};
+    RefResult r{0.0, 0.0, 0.0};
     const size_t n = x.size() < y.size() ? x.size() : y.size();
     for (size_t i = 0; i < n; ++i) {
         const double p = x[i] * y[i];
         r.dot     += p;
         r.abs_sum += p < 0 ? -p : p;
     }
+    r.intermediate_mag = r.abs_sum;
+    return r;
+}
+
+RefResult reference_dot_blocked(const std::vector<double>& x,
+                                const std::vector<double>& y,
+                                int sub_block) {
+    RefResult r{0.0, 0.0, 0.0};
+    const size_t n = x.size() < y.size() ? x.size() : y.size();
+    if (sub_block <= 0) return reference_dot(x, y);
+
+    // Track the peak magnitude of each sub-block's partial sum alongside the
+    // total. When sub-blocks are large and cancel against each other, the
+    // intermediates the kernel rounds are far bigger than either the result or
+    // sum|x_i y_i|, and the bound must scale with them.
+    for (size_t base = 0; base < n; base += (size_t)sub_block) {
+        const size_t hi = std::min(base + (size_t)sub_block, n);
+        double part = 0.0;
+        for (size_t i = base; i < hi; ++i) {
+            const double p = x[i] * y[i];
+            part      += p;
+            r.abs_sum += p < 0 ? -p : p;
+        }
+        r.dot += part;
+        const double a = part < 0 ? -part : part;
+        if (a > r.intermediate_mag) r.intermediate_mag = a;
+    }
+    // The bound must cover both the per-term products and the sub-block
+    // partials, whichever dominates.
+    if (r.abs_sum > r.intermediate_mag) r.intermediate_mag = r.abs_sum;
     return r;
 }
 

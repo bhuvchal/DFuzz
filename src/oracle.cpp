@@ -1,6 +1,7 @@
 #include "dfuzz/oracle.h"
 #include "dfuzz/reference.h"
 #include "dfuzz/init.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -23,6 +24,44 @@ void ggml_vec_dot_q6_K_q8_K_generic (int,float*,size_t,const void*,size_t,const 
 }
 
 namespace dfuzz {
+
+namespace {
+
+// Sum over sub-blocks of |dmin * min * d8 * sum(q8)|: the magnitude of the
+// offset correction the q4_K kernel forms and rounds in fp32.
+double q4k_offset_magnitude(const void* vx, const void* vy, int nblocks) {
+    struct blk { uint16_t d, dmin; uint8_t scales[12]; uint8_t qs[128]; };
+    struct b8  { float d; int8_t qs[256]; int16_t bsums[16]; };
+    const auto* x = static_cast<const blk*>(vx);
+    const auto* y = static_cast<const b8*>(vy);
+
+    auto h2d = [](uint16_t h) {
+        const uint32_t s = (h >> 15) & 1u, e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
+        double v;
+        if (e == 0)        v = (double)m * 5.9604644775390625e-08;
+        else if (e == 0x1F) v = m ? __builtin_nan("") : __builtin_inf();
+        else               v = (1.0 + (double)m / 1024.0) * __builtin_ldexp(1.0, (int)e - 15);
+        return s ? -v : v;
+    };
+
+    double total = 0.0;
+    for (int i = 0; i < nblocks; ++i) {
+        const double dmin = h2d(x[i].dmin);
+        const double d8   = (double)y[i].d;
+        for (int sb = 0; sb < 8; ++sb) {
+            uint8_t mn;
+            if (sb < 4) mn = x[i].scales[sb + 4] & 63;
+            else        mn = (uint8_t)((x[i].scales[sb + 4] >> 4) | ((x[i].scales[sb] >> 6) << 4));
+            int sum8 = 0;
+            for (int k = sb * 32; k < (sb + 1) * 32; ++k) sum8 += y[i].qs[k];
+            const double t = dmin * (double)mn * d8 * (double)sum8;
+            total += t < 0 ? -t : t;
+        }
+    }
+    return total;
+}
+
+} // namespace
 
 const char* axis_name(Axis a) {
     switch (a) {
@@ -127,8 +166,28 @@ Outcome Oracle::evaluate(const Case& c) {
     if (uses_q8_K(c.fmt)) dequantize_q8_K(s_->yq.data(), nby, s_->yd);
     else                  dequantize_q8_0(s_->yq.data(), nby, s_->yd);
 
-    const RefResult ref = reference_dot(s_->xd, s_->yd);
+    // Sub-block size at which the kernel forms fp32 partial sums. Passing it
+    // lets the reference record the peak intermediate magnitude, which is what
+    // the kernel's roundings actually act on -- for q4_K that is far larger
+    // than sum|x_i y_i| because a big offset term is subtracted from a big
+    // scaled sum.
+    const int sub = (c.fmt == Format::q4_K || c.fmt == Format::q6_K) ? 32
+                  : (c.fmt == Format::nvfp4 ? QK_NVFP4_SUB : QK_MXFP4);
+    RefResult ref = reference_dot_blocked(s_->xd, s_->yd, sub);
     const int depth = accumulation_depth(c.fmt, n);
+
+    // q4_K reconstructs x = d*scale*q - dmin*min. The kernel therefore forms
+    // a large positive scaled sum and subtracts a large offset term, and
+    // rounds BOTH in fp32. Neither appears in sum|x_i y_i|, which only sees
+    // the differences. Measured on failing cases the offset term ran 30-60x
+    // sum|x_i y_i|, which is precisely the gap that made the bound too tight
+    // for mixed-magnitude inputs.
+    //
+    // Only q4_K carries an offset; q6_K, mxfp4 and nvfp4 are pure scale.
+    if (c.fmt == Format::q4_K) {
+        ref.intermediate_mag = std::max(ref.intermediate_mag,
+                                        q4k_offset_magnitude(s_->xq.data(), s_->yq.data(), nbx));
+    }
 
     out.simd = simd; out.generic = gen; out.reference = ref.dot; out.abs_sum = ref.abs_sum;
 
@@ -139,7 +198,7 @@ Outcome Oracle::evaluate(const Case& c) {
     };
     for (auto& e : axes) {
         // depth*256 with qk=256 reproduces the per-format depth inside check().
-        const Verdict v = check(e.a, e.b, ref.abs_sum, depth * 256, 256);
+        const Verdict v = check(e.a, e.b, ref.intermediate_mag, depth * 256, 256);
         if (v.ratio > out.ratio || !out.failed) {
             if (v.ratio > out.ratio) { out.ratio = v.ratio; out.worst = e.ax; }
         }
