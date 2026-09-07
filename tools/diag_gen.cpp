@@ -23,9 +23,11 @@ int main(){
   std::printf("\n# generation fingerprint\n");
 
   std::mt19937_64 rng(0x9e3779b97f4a7c15ull);
-  std::printf("  engine[0..3]: %llu %llu %llu %llu\n",
-    (unsigned long long)rng(),(unsigned long long)rng(),
-    (unsigned long long)rng(),(unsigned long long)rng());
+  // Sequenced explicitly: argument evaluation order is unspecified, so
+  // calling rng() four times inside one printf prints them in whatever order
+  // the compiler chose.
+  unsigned long long e0 = rng(), e1 = rng(), e2 = rng(), e3 = rng();
+  std::printf("  engine[0..3]: %llu %llu %llu %llu\n", e0, e1, e2, e3);
 
   std::printf("  ldexp(1.0,-30)=%.17g  log(0.5)=%.17g  cos(1.0)=%.17g  sqrt(2.0)=%.17g\n",
     std::ldexp(1.0,-30), std::log(0.5), std::cos(1.0), std::sqrt(2.0));

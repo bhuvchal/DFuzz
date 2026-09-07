@@ -73,7 +73,11 @@ Case generate(const GenSpec& spec) {
 
     switch (spec.cls) {
         case InputClass::Uniform:
-            for (int i = 0; i < n; ++i) { c.x[i] = u(); c.y[i] = u(); }
+            for (int i = 0; i < n; ++i) {
+                const float a = u();
+                const float b = u();
+                c.x[i] = a; c.y[i] = b;
+            }
             break;
 
         case InputClass::Cancellation: {
@@ -91,9 +95,19 @@ Case generate(const GenSpec& spec) {
         }
 
         case InputClass::MixedMagnitude: {
+            // Each draw is sequenced explicitly. Function-argument evaluation
+            // order is UNSPECIFIED in C++, so writing
+            //   ldexp(g(), portable_int(rng, ...))
+            // lets two platforms consume the engine stream in opposite orders
+            // and produce different inputs from the same seed -- which silently
+            // invalidates the whole cross-path comparison.
             for (int i = 0; i < n; ++i) {
-                c.x[i] = std::ldexp(g(), portable_int(rng, -30, 30));
-                c.y[i] = std::ldexp(g(), portable_int(rng, -30, 30));
+                const float mx = g();
+                const int   ex = portable_int(rng, -30, 30);
+                c.x[i] = std::ldexp(mx, ex);
+                const float my = g();
+                const int   ey = portable_int(rng, -30, 30);
+                c.y[i] = std::ldexp(my, ey);
             }
             break;
         }
@@ -101,15 +115,20 @@ Case generate(const GenSpec& spec) {
         case InputClass::Denormal: {
             const float tiny = std::numeric_limits<float>::denorm_min();
             for (int i = 0; i < n; ++i) {
-                c.x[i] = (portable_int(rng,0,1) ? 1.f : -1.f) * tiny * (float)portable_int(rng,1,1000);
-                c.y[i] = (portable_int(rng,0,1) ? 1.f : -1.f) * tiny * (float)portable_int(rng,1,1000);
+                const int sx = portable_int(rng,0,1);
+                const int mx = portable_int(rng,1,1000);
+                c.x[i] = (sx ? 1.f : -1.f) * tiny * (float)mx;
+                const int sy = portable_int(rng,0,1);
+                const int my = portable_int(rng,1,1000);
+                c.y[i] = (sy ? 1.f : -1.f) * tiny * (float)my;
             }
             break;
         }
 
         case InputClass::SignedZero: {
             for (int i = 0; i < n; ++i) {
-                const int a = portable_int(rng,0,2), b = portable_int(rng,0,2);
+                const int a = portable_int(rng,0,2);
+                const int b = portable_int(rng,0,2);
                 c.x[i] = a == 0 ? 0.0f : (a == 1 ? -0.0f : g());
                 c.y[i] = b == 0 ? 0.0f : (b == 1 ? -0.0f : g());
             }
@@ -118,8 +137,12 @@ Case generate(const GenSpec& spec) {
 
         case InputClass::PowerOfTwo: {
             for (int i = 0; i < n; ++i) {
-                c.x[i] = std::ldexp(portable_int(rng,0,1) ? 1.f : -1.f, portable_int(rng,-10,10));
-                c.y[i] = std::ldexp(portable_int(rng,0,1) ? 1.f : -1.f, portable_int(rng,-10,10));
+                const int sx = portable_int(rng,0,1);
+                const int ex = portable_int(rng,-10,10);
+                c.x[i] = std::ldexp(sx ? 1.f : -1.f, ex);
+                const int sy = portable_int(rng,0,1);
+                const int ey = portable_int(rng,-10,10);
+                c.y[i] = std::ldexp(sy ? 1.f : -1.f, ey);
             }
             break;
         }
@@ -129,7 +152,11 @@ Case generate(const GenSpec& spec) {
             // rest toward zero. Exercises the encoder's saturation path and
             // the resulting all-but-one-zero block in the kernel.
             const int be = block_elems(spec.fmt);
-            for (int i = 0; i < n; ++i) { c.x[i] = g() * 1e-3f; c.y[i] = g(); }
+            for (int i = 0; i < n; ++i) {
+                const float a = g();
+                const float b = g();
+                c.x[i] = a * 1e-3f; c.y[i] = b;
+            }
             for (int b = 0; b < spec.blocks; ++b) c.x[b * be] = 1e4f;
             break;
         }
