@@ -1,6 +1,8 @@
 #include "dfuzz/reference.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
+#include <vector>
 
 namespace dfuzz {
 namespace {

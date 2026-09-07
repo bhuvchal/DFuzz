@@ -57,8 +57,8 @@ ShrinkStats shrink_with(FakeOracle& o, Case& c, const Signature& want,
                 if (!cand) continue;
                 if (o.still_fails(*cand, want)) {
                     if (opt.verbose)
-                        std::printf("  %-9s n=%4d -> %4d  kept\n",
-                                    std::string(p.name()).c_str(), c.n(), cand->n());
+                        std::printf("  %-9.*s n=%4d -> %4d  kept\n",
+                                    (int)p.name().size(), p.name().data(), c.n(), cand->n());
                     c = std::move(*cand);
                     ++st.accepted; made = true;
                     i = (std::size_t)-1;

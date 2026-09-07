@@ -18,6 +18,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include <algorithm>
 
 extern "C" {
 void dequantize_row_q4_K(const void* x, float* y, int64_t k);

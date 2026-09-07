@@ -106,8 +106,8 @@ bool run_pass(P& p, Case& c, const Signature& want, Oracle& oracle,
         if (!cand) continue;
         if (oracle.still_fails(*cand, want)) {
             if (opt.verbose) {
-                std::printf("  %-9s n=%4d -> %4d  kept\n",
-                            std::string(p.name()).c_str(), c.n(), cand->n());
+                std::printf("  %-9.*s n=%4d -> %4d  kept\n",
+                            (int)p.name().size(), p.name().data(), c.n(), cand->n());
             }
             c = std::move(*cand);   // move, not copy: candidates own big vectors
             ++st.accepted;

@@ -4,6 +4,8 @@
 #include "dfuzz/init.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
+#include <vector>
 
 extern "C" {
 void quantize_row_mxfp4_ref(const float*, void*, int64_t);
