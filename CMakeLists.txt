@@ -31,6 +31,9 @@ add_library(dfuzz_core STATIC
 target_include_directories(dfuzz_core PUBLIC include)
 target_link_libraries(dfuzz_core PUBLIC ggml-cpu ggml-base)
 
+add_executable(diag_bsums tools/diag_bsums.cpp)
+target_link_libraries(diag_bsums PRIVATE dfuzz_core)
+
 add_executable(diag_gen tools/diag_gen.cpp)
 target_link_libraries(diag_gen PRIVATE dfuzz_core)
 
