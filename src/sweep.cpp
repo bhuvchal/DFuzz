@@ -42,10 +42,23 @@ int main(int argc, char** argv) {
 
     long long seeds_per_cell = 32;
     bool verbose_shrink = false;
+    const char* emit_path = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--seeds") && i + 1 < argc) seeds_per_cell = std::atoll(argv[++i]);
         else if (!std::strcmp(argv[i], "--verbose")) verbose_shrink = true;
+        // Emit every kernel result as data so two builds -- AVX2 vs AVX-512 vs
+        // NEON -- can be compared against EACH OTHER, not merely each against
+        // the reference. That cross-path axis is unreachable from a single
+        // machine and is the main reason this project has CI.
+        else if (!std::strcmp(argv[i], "--emit") && i + 1 < argc) emit_path = argv[++i];
     }
+
+    std::FILE* emit = emit_path ? std::fopen(emit_path, "w") : nullptr;
+    if (emit_path && !emit) {
+        std::fprintf(stderr, "cannot open %s for writing\n", emit_path);
+        return 2;
+    }
+    if (emit) std::fprintf(emit, "fmt\tclass\tblocks\tseed\tsimd\tgeneric\treference\n");
 
     print_build_config();
     std::printf("#   seeds/cell    : %lld\n", seeds_per_cell);
@@ -75,6 +88,15 @@ int main(int argc, char** argv) {
                     const Case c = generate(spec);
                     const Outcome o = oracle.evaluate(c);
                     ++total;
+
+                    if (emit) {
+                        // %.9g round-trips fp32 exactly, so a byte-identical
+                        // line means a byte-identical kernel result.
+                        std::fprintf(emit, "%s\t%s\t%d\t0x%llx\t%.9g\t%.9g\t%.17g\n",
+                                     format_name(fmt), input_class_name(cls), blocks,
+                                     (unsigned long long)spec.seed,
+                                     o.simd, o.generic, o.reference);
+                    }
 
                     Tally& t = by_cell[cell];
                     ++t.cases;
@@ -114,6 +136,8 @@ int main(int argc, char** argv) {
 
     std::printf("\n# oracle: %lld evaluations, %lld buffer growths\n",
                 oracle.evaluations(), oracle.allocations());
+    if (emit) { std::fclose(emit); std::printf("\n# results emitted to %s\n", emit_path); }
+
     std::printf(findings.empty()
         ? "\nSWEEP CLEAN: conformance holds across all cells within the derived bound\n"
         : "\nSWEEP FOUND %zu DIVERGENCES\n", findings.size());

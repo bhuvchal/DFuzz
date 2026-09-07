@@ -1,0 +1,112 @@
+name: conformance
+
+# The cross-path axis (AVX2 vs AVX-512 vs NEON) is the richest bug surface in
+# this project and is structurally unreachable on an arm64 development machine.
+# CI exists primarily to reach it, and secondarily to keep the coverage claim
+# honest as llama.cpp moves.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Upstream moves fast; a weekly run catches conformance regressions that
+    # arrive from their side rather than ours.
+    - cron: '0 6 * * 1'
+
+jobs:
+  conformance:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: x86_64-baseline
+            # No -march: whatever the runner dispatches to at runtime.
+            cflags: ''
+          - os: ubuntu-24.04
+            name: x86_64-avx2
+            cflags: '-mavx2 -mfma -mf16c'
+          - os: ubuntu-24.04
+            name: x86_64-avx512
+            cflags: '-mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma -mf16c'
+          - os: ubuntu-24.04
+            name: x86_64-generic
+            # Forces ggml's portable scalar kernels, so the _generic paths are
+            # exercised as the primary implementation rather than as the oracle.
+            cmake_extra: '-DGGML_CPU_GENERIC=ON'
+          - os: macos-14
+            name: arm64-neon
+            cflags: ''
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Report host CPU
+        run: |
+          echo "=== host capabilities ==="
+          if [ -f /proc/cpuinfo ]; then
+            grep -m1 'model name' /proc/cpuinfo || true
+            grep -o -m1 -E 'avx512[a-z]*|avx2|fma|f16c' /proc/cpuinfo | sort -u | tr '\n' ' '; echo
+          else
+            sysctl -n machdep.cpu.brand_string || true
+          fi
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="${{ matrix.cflags }}" \
+            -DCMAKE_C_FLAGS="${{ matrix.cflags }}" \
+            ${{ matrix.cmake_extra }}
+
+      - name: Build
+        run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+
+      # Tests first: they are fast and a failure here means the sweep's results
+      # would be meaningless anyway.
+      - name: Unit and validation tests
+        run: ctest --test-dir build --output-on-failure
+
+      # The build config each binary prints is part of the result record: a
+      # conformance claim without it is unfalsifiable.
+      # --emit writes every kernel result as data. The seed set is identical
+      # across builds, so the cross-path job can compare AVX2 against AVX-512
+      # against NEON directly.
+      - name: Conformance sweep
+        run: ./build/dfuzz_sweep --seeds 64 --emit results-${{ matrix.name }}.tsv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.name }}
+          path: results-${{ matrix.name }}.tsv
+          if-no-files-found: warn
+
+  # The axis this whole file exists for: not "does each build match the
+  # reference" but "do the SIMD paths match EACH OTHER". No reference of ours
+  # is involved, so a divergence here is unambiguous.
+  cross-path:
+    needs: conformance
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          merge-multiple: true
+      - name: Compare paths against each other
+        run: |
+          ls -la *.tsv || { echo "no result files produced"; exit 1; }
+          args=""
+          for f in results-*.tsv; do
+            name="${f#results-}"; name="${name%.tsv}"
+            args="$args $name=$f"
+          done
+          echo "comparing:$args"
+          python3 tools/crosspath.py $args
