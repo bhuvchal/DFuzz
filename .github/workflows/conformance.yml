@@ -28,6 +28,13 @@ jobs:
             cflags: '-mavx2 -mfma -mf16c'
             requires: 'avx2 fma f16c'
           - os: ubuntu-24.04
+            name: x86_64-avx2-nofma-contract
+            # Same instruction set, but the compiler may not fuse a*b+c into a
+            # single FMA. If the avx2 divergence vanishes here, it is compiler
+            # contraction changing the rounding, not a kernel defect.
+            cflags: '-mavx2 -mfma -mf16c -ffp-contract=off'
+            requires: 'avx2 fma f16c'
+          - os: ubuntu-24.04
             name: x86_64-avx512
             cflags: '-mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma -mf16c'
             requires: 'avx512f avx512bw avx512vl avx512dq fma f16c'
