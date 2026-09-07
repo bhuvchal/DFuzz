@@ -26,9 +26,11 @@ jobs:
           - os: ubuntu-24.04
             name: x86_64-avx2
             cflags: '-mavx2 -mfma -mf16c'
+            requires: 'avx2 fma f16c'
           - os: ubuntu-24.04
             name: x86_64-avx512
             cflags: '-mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma -mf16c'
+            requires: 'avx512f avx512bw avx512vl avx512dq fma f16c'
           - os: ubuntu-24.04
             name: x86_64-generic
             # Forces ggml's portable scalar kernels, so the _generic paths are
@@ -45,17 +47,35 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Report host CPU
+      # A -march the runner cannot execute produces SIGILL in every binary,
+      # which looks like total failure rather than "wrong build flags". Detect
+      # what the host actually has and skip configurations it cannot run.
+      - name: Detect host CPU
+        id: cpu
         run: |
           echo "=== host capabilities ==="
           if [ -f /proc/cpuinfo ]; then
             grep -m1 'model name' /proc/cpuinfo || true
-            grep -o -m1 -E 'avx512[a-z]*|avx2|fma|f16c' /proc/cpuinfo | sort -u | tr '\n' ' '; echo
+            FLAGS=$(grep -m1 '^flags' /proc/cpuinfo || echo "")
+            for f in avx2 avx512f avx512bw avx512vl avx512dq fma f16c; do
+              case " $FLAGS " in *" $f "*) echo "  $f: yes";; *) echo "  $f: no";; esac
+            done
+            SUPPORTED=yes
+            for need in ${{ matrix.requires }}; do
+              case " $FLAGS " in
+                *" $need "*) ;;
+                *) SUPPORTED=no; echo "host lacks '$need'";;
+              esac
+            done
           else
             sysctl -n machdep.cpu.brand_string || true
+            SUPPORTED=yes
           fi
+          echo "supported=$SUPPORTED" >> "$GITHUB_OUTPUT"
+          [ "$SUPPORTED" = yes ] || echo "::notice::skipping ${{ matrix.name }}: host lacks required features"
 
       - name: Configure
+        if: steps.cpu.outputs.supported == 'yes'
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -64,11 +84,13 @@ jobs:
             ${{ matrix.cmake_extra }}
 
       - name: Build
+        if: steps.cpu.outputs.supported == 'yes'
         run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
 
       # Tests first: they are fast and a failure here means the sweep's results
       # would be meaningless anyway.
       - name: Unit and validation tests
+        if: steps.cpu.outputs.supported == 'yes'
         run: ctest --test-dir build --output-on-failure
 
       # The build config each binary prints is part of the result record: a
@@ -77,10 +99,11 @@ jobs:
       # across builds, so the cross-path job can compare AVX2 against AVX-512
       # against NEON directly.
       - name: Conformance sweep
+        if: steps.cpu.outputs.supported == 'yes'
         run: ./build/dfuzz_sweep --seeds 64 --emit results-${{ matrix.name }}.tsv
 
       - name: Upload results
-        if: always()
+        if: steps.cpu.outputs.supported == 'yes'
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.name }}
