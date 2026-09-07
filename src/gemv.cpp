@@ -13,6 +13,12 @@ void quantize_row_q8_K_ref (const float*, void*, int64_t);
 void ggml_vec_dot_q4_K_q8_K(int,float*,size_t,const void*,size_t,const void*,size_t,int);
 void ggml_gemv_q4_K_8x8_q8_K        (int,float*,size_t,const void*,const void*,int,int);
 void ggml_gemv_q4_K_8x8_q8_K_generic(int,float*,size_t,const void*,const void*,int,int);
+void ggml_gemm_mxfp4_4x4_q8_0        (int,float*,size_t,const void*,const void*,int,int);
+void ggml_gemm_mxfp4_4x4_q8_0_generic(int,float*,size_t,const void*,const void*,int,int);
+void ggml_quantize_mat_q8_0_4x4(const float*, void*, int64_t);
+void ggml_quantize_mat_q8_K_4x8(const float*, void*, int64_t);
+void ggml_gemm_q4_K_8x8_q8_K        (int,float*,size_t,const void*,const void*,int,int);
+void ggml_gemm_q4_K_8x8_q8_K_generic(int,float*,size_t,const void*,const void*,int,int);
 void ggml_vec_dot_mxfp4_q8_0(int,float*,size_t,const void*,size_t,const void*,size_t,int);
 void ggml_gemv_mxfp4_4x4_q8_0        (int,float*,size_t,const void*,const void*,int,int);
 void ggml_gemv_mxfp4_4x4_q8_0_generic(int,float*,size_t,const void*,const void*,int,int);
@@ -201,6 +207,134 @@ GemvResult run_mxfp4_gemv(const std::vector<std::vector<float>>& rows,
         const RefResult rr = reference_dot_blocked(xd, yd, QK_MXFP4);
         r.reference[j] = rr.dot;
         r.intermediate_mag[j] = rr.intermediate_mag;
+    }
+    return r;
+}
+
+} // namespace dfuzz
+
+namespace dfuzz {
+
+GemmResult run_mxfp4_gemm(const std::vector<std::vector<float>>& wrows,
+                          const std::vector<std::vector<float>>& arows) {
+    require_initialized("run_mxfp4_gemm");
+    GemmResult r;
+    const int nc = (int)wrows.size();
+    const int nr = (int)arows.size();
+    if (nc == 0 || nr == 0 || nc % 4 != 0 || nr % 4 != 0) return r;
+    const int n  = (int)arows[0].size();
+    const int nb = n / QK_MXFP4;
+    if (nb == 0) return r;
+    r.nr = nr; r.nc = nc;
+
+    // Weight side: quantize each row, then interleave 4-wide (same packing the
+    // gemv path uses, so the two are directly comparable).
+    std::vector<uint8_t> rowq((size_t)nc * nb * sizeof(block_mxfp4));
+    for (int j = 0; j < nc; ++j)
+        quantize_row_mxfp4_ref(wrows[(size_t)j].data(),
+                               rowq.data() + (size_t)j*nb*sizeof(block_mxfp4), n);
+    std::vector<uint8_t> packed;
+    repack_mxfp4_4x4(rowq.data(), nc, nb, packed);
+
+    // Activation side: ggml's own matrix quantizer, which expects 4 rows
+    // contiguous and produces block_q8_0x4. Using theirs rather than
+    // reimplementing removes our largest remaining source of reference error.
+    std::vector<float> aflat((size_t)nr * n);
+    for (int m = 0; m < nr; ++m)
+        std::memcpy(aflat.data() + (size_t)m*n, arows[(size_t)m].data(), (size_t)n*sizeof(float));
+
+    const size_t q8x4_bytes = 4*sizeof(uint16_t) + (size_t)QK8_0*4;
+    std::vector<uint8_t> aq((size_t)(nr/4) * nb * q8x4_bytes);
+    for (int g = 0; g < nr/4; ++g)
+        ggml_quantize_mat_q8_0_4x4(aflat.data() + (size_t)g*4*n,
+                                   aq.data() + (size_t)g*nb*q8x4_bytes, n);
+
+    r.simd.assign((size_t)nr*nc, 0.0f);
+    r.generic.assign((size_t)nr*nc, 0.0f);
+    ggml_gemm_mxfp4_4x4_q8_0        (n, r.simd.data(),    (size_t)nc, packed.data(), aq.data(), nr, nc);
+    ggml_gemm_mxfp4_4x4_q8_0_generic(n, r.generic.data(), (size_t)nc, packed.data(), aq.data(), nr, nc);
+
+    // Reference-free cross-check: run gemv per activation row on the SAME
+    // repacked weights.
+    r.gemv_rows.assign((size_t)nr*nc, 0.0f);
+    r.reference.assign((size_t)nr*nc, 0.0);
+    r.intermediate_mag.assign((size_t)nr*nc, 0.0);
+    std::vector<double> yd;
+    for (int m = 0; m < nr; ++m) {
+        std::vector<uint8_t> yq((size_t)nb * 34);
+        quantize_row_q8_0_ref(arows[(size_t)m].data(), yq.data(), n);
+        ggml_gemv_mxfp4_4x4_q8_0(n, r.gemv_rows.data() + (size_t)m*nc, 0,
+                                 packed.data(), yq.data(), 1, nc);
+        dequantize_q8_0(yq.data(), nb, yd);
+        for (int j = 0; j < nc; ++j) {
+            std::vector<double> xd;
+            dequantize_mxfp4(rowq.data() + (size_t)j*nb*sizeof(block_mxfp4), nb, xd);
+            const RefResult rr = reference_dot_blocked(xd, yd, QK_MXFP4);
+            r.reference[(size_t)m*nc + j]        = rr.dot;
+            r.intermediate_mag[(size_t)m*nc + j] = rr.intermediate_mag;
+        }
+    }
+    return r;
+}
+
+} // namespace dfuzz
+
+namespace dfuzz {
+
+GemmResult run_q4_K_gemm(const std::vector<std::vector<float>>& wrows,
+                         const std::vector<std::vector<float>>& arows) {
+    require_initialized("run_q4_K_gemm");
+    GemmResult r;
+    const int nc = (int)wrows.size();
+    const int nr = (int)arows.size();
+    if (nc == 0 || nr == 0 || nc % 8 != 0 || nr % 4 != 0) return r;
+    const int n  = (int)arows[0].size();
+    const int nb = n / 256;
+    if (nb == 0) return r;
+    r.nr = nr; r.nc = nc;
+
+    std::vector<uint8_t> rowq((size_t)nc * nb * sizeof(block_q4_K));
+    for (int j = 0; j < nc; ++j)
+        quantize_row_q4_K_ref(wrows[(size_t)j].data(),
+                              rowq.data() + (size_t)j*nb*sizeof(block_q4_K), n);
+    std::vector<uint8_t> packed;
+    repack_q4_K_8x8(rowq.data(), nc, nb, packed);
+
+    std::vector<float> aflat((size_t)nr * n);
+    for (int m = 0; m < nr; ++m)
+        std::memcpy(aflat.data() + (size_t)m*n, arows[(size_t)m].data(), (size_t)n*sizeof(float));
+
+    // block_q8_Kx4: 4 floats + 4*256 int8 + (256/4) int16
+    const size_t q8Kx4_bytes = 4*sizeof(float) + 4*256 + (256/4)*sizeof(int16_t);
+    std::vector<uint8_t> aq((size_t)(nr/4) * nb * q8Kx4_bytes);
+    for (int g = 0; g < nr/4; ++g)
+        ggml_quantize_mat_q8_K_4x8(aflat.data() + (size_t)g*4*n,
+                                   aq.data() + (size_t)g*nb*q8Kx4_bytes, n);
+
+    r.simd.assign((size_t)nr*nc, 0.0f);
+    r.generic.assign((size_t)nr*nc, 0.0f);
+    ggml_gemm_q4_K_8x8_q8_K        (n, r.simd.data(),    (size_t)nc, packed.data(), aq.data(), nr, nc);
+    ggml_gemm_q4_K_8x8_q8_K_generic(n, r.generic.data(), (size_t)nc, packed.data(), aq.data(), nr, nc);
+
+    r.gemv_rows.assign((size_t)nr*nc, 0.0f);
+    r.reference.assign((size_t)nr*nc, 0.0);
+    r.intermediate_mag.assign((size_t)nr*nc, 0.0);
+    std::vector<double> yd;
+    for (int m = 0; m < nr; ++m) {
+        std::vector<uint8_t> yq((size_t)nb * 292);
+        quantize_row_q8_K_ref(arows[(size_t)m].data(), yq.data(), n);
+        ggml_gemv_q4_K_8x8_q8_K(n, r.gemv_rows.data() + (size_t)m*nc, 0,
+                                packed.data(), yq.data(), 1, nc);
+        dequantize_q8_K(yq.data(), nb, yd);
+        for (int j = 0; j < nc; ++j) {
+            const void* rp = rowq.data() + (size_t)j*nb*sizeof(block_q4_K);
+            std::vector<double> xd;
+            dequantize_q4_K(rp, nb, xd);
+            const RefResult rr = reference_dot_blocked(xd, yd, 32);
+            r.reference[(size_t)m*nc + j] = rr.dot;
+            r.intermediate_mag[(size_t)m*nc + j] =
+                std::max(rr.intermediate_mag, q4k_offset_magnitude(rp, yq.data(), nb));
+        }
     }
     return r;
 }

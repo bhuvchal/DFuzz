@@ -47,4 +47,35 @@ void repack_q4_K_8x8(const void* src_rows, int nrows, int nblocks,
 GemvResult run_q4_K_gemv(const std::vector<std::vector<float>>& rows,
                          const std::vector<float>& activations);
 
+// --- gemm: both operands interleaved --------------------------------------
+// gemm interleaves the ACTIVATION side too (block_q8_0x4 / q8_Kx4) and writes
+// through a real output stride. Two interleavings interacting plus a strided
+// write is materially more index arithmetic than gemv.
+//
+// Decisive axis, again reference-free:
+//
+//   gemm output[m][j]  ==  gemv output[j] run on activation row m
+//
+// Both consume the SAME repacked weights, so any disagreement is in the gemm
+// path's own indexing.
+struct GemmResult {
+    int nr = 0, nc = 0;
+    std::vector<float>  simd;       // nr x nc, row-major with stride nc
+    std::vector<float>  generic;
+    std::vector<float>  gemv_rows;  // per activation row, via gemv
+    std::vector<double> reference;
+    std::vector<double> intermediate_mag;
+};
+
+// weight_rows.size() == nc (multiple of 4), act_rows.size() == nr (multiple of 4).
+GemmResult run_mxfp4_gemm(const std::vector<std::vector<float>>& weight_rows,
+                          const std::vector<std::vector<float>>& act_rows);
+
+// q4_K 8x8 gemm. On arm64 this has dedicated NEON and SVE implementations
+// gated on __ARM_FEATURE_MATMUL_INT8, so it is several distinct kernels behind
+// one symbol -- the largest conditional surface in this project.
+// nc multiple of 8, nr multiple of 4, n multiple of 256.
+GemmResult run_q4_K_gemm(const std::vector<std::vector<float>>& weight_rows,
+                         const std::vector<std::vector<float>>& act_rows);
+
 } // namespace dfuzz
