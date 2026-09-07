@@ -128,6 +128,13 @@ jobs:
       # --emit writes every kernel result as data. The seed set is identical
       # across builds, so the cross-path job can compare AVX2 against AVX-512
       # against NEON directly.
+      # Shrink the q6_K divergence to a minimal reproducer. Must run here:
+      # the case does not fail on arm64 at all, so it cannot be shrunk locally.
+      - name: shrink q6_K divergence
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: ./build/shrink_case --fmt q6_K --class mixed-magnitude --blocks 1 --seed 0x9e3579b87e4a7c19
+
       - name: Conformance sweep
         if: steps.cpu.outputs.supported == 'yes'
         run: ./build/dfuzz_sweep --seeds 64 --emit results-${{ matrix.name }}.tsv
