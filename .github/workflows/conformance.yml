@@ -130,6 +130,21 @@ jobs:
       # against NEON directly.
       # Shrink the q6_K divergence to a minimal reproducer. Must run here:
       # the case does not fail on arm64 at all, so it cannot be shrunk locally.
+      # Standalone reproducer: llama.cpp functions only, none of this harness.
+      # If this diverges, the finding does not depend on anything we wrote.
+      - name: standalone reproducer
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: |
+          cc -O2 ${{ matrix.cflags }} \
+            -I third_party/llama.cpp/ggml/include \
+            -I third_party/llama.cpp/ggml/src \
+            -I third_party/llama.cpp/ggml/src/ggml-cpu \
+            repro/q6k_x86.c -o /tmp/q6k \
+            build/third_party/llama.cpp/ggml/src/libggml-cpu.a \
+            build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -lstdc++
+          /tmp/q6k
+
       - name: shrink q6_K divergence
         if: steps.cpu.outputs.supported == 'yes'
         continue-on-error: true

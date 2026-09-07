@@ -30,10 +30,10 @@ int main(void) {
     // Minimized by the DFuzz shrinker from q6_K/mixed-magnitude seed
     // 0x9e3579b87e4a7c19: 3 nonzero weights, 2 nonzero activations.
     x[87]  =  11429230.0f;
-    x[148] = -774724.25f;
-    x[151] =  510633.031f;
-    y[87]  = -7282.96387f;
-    y[151] =  65.4250183f;
+    x[140] = -774724.25f;
+    x[143] =  510633.031f;
+    y[86]  = -7282.96387f;
+    y[143] =  65.4250183f;
 
     static unsigned char xq[210], yq[292];
     quantize_row_q6_K_ref(x, xq, N);
