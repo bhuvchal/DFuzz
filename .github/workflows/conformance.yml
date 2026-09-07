@@ -94,6 +94,15 @@ jobs:
         continue-on-error: true
         run: ./build/diag_gemm
 
+      # Does the activation packing itself differ? gemm consumes
+      # ggml_quantize_mat_q8_K_4x8 while gemv consumes quantize_row_q8_K_ref.
+      # If those disagree, the kernels legitimately compute different things
+      # and there is no kernel defect to report.
+      - name: activation packing diagnostic
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: ./build/diag_q8pack
+
       - name: Unit and validation tests
         if: steps.cpu.outputs.supported == 'yes'
         continue-on-error: true

@@ -31,6 +31,9 @@ add_library(dfuzz_core STATIC
 target_include_directories(dfuzz_core PUBLIC include)
 target_link_libraries(dfuzz_core PUBLIC ggml-cpu ggml-base)
 
+add_executable(diag_q8pack tools/diag_q8pack.cpp)
+target_link_libraries(diag_q8pack PRIVATE dfuzz_core)
+
 add_executable(diag_gemm tools/diag_gemm.cpp)
 target_link_libraries(diag_gemm PRIVATE dfuzz_core)
 
