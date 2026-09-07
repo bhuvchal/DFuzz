@@ -16,14 +16,18 @@ void ggml_vec_dot_q4_K_q8_K(int,float*,size_t,const void*,size_t,const void*,siz
 void ggml_gemv_q4_K_8x8_q8_K        (int,float*,size_t,const void*,const void*,int,int);
 void ggml_gemv_q4_K_8x8_q8_K_generic(int,float*,size_t,const void*,const void*,int,int);
 void ggml_gemm_mxfp4_4x4_q8_0        (int,float*,size_t,const void*,const void*,int,int);
+#if DFUZZ_HAS_MXFP4_REPACK_SIMD
 void ggml_gemm_mxfp4_4x4_q8_0_generic(int,float*,size_t,const void*,const void*,int,int);
+#endif
 void ggml_quantize_mat_q8_0_4x4(const float*, void*, int64_t);
 void ggml_quantize_mat_q8_K_4x8(const float*, void*, int64_t);
 void ggml_gemm_q4_K_8x8_q8_K        (int,float*,size_t,const void*,const void*,int,int);
 void ggml_gemm_q4_K_8x8_q8_K_generic(int,float*,size_t,const void*,const void*,int,int);
 void ggml_vec_dot_mxfp4_q8_0(int,float*,size_t,const void*,size_t,const void*,size_t,int);
 void ggml_gemv_mxfp4_4x4_q8_0        (int,float*,size_t,const void*,const void*,int,int);
+#if DFUZZ_HAS_MXFP4_REPACK_SIMD
 void ggml_gemv_mxfp4_4x4_q8_0_generic(int,float*,size_t,const void*,const void*,int,int);
+#endif
 }
 
 namespace dfuzz {
@@ -192,7 +196,14 @@ GemvResult run_mxfp4_gemv(const std::vector<std::vector<float>>& rows,
     r.simd.assign(nc, 0.0f);
     r.generic.assign(nc, 0.0f);
     ggml_gemv_mxfp4_4x4_q8_0        (n, r.simd.data(),    0, packed.data(), yq.data(), 1, nc);
+#if DFUZZ_HAS_MXFP4_REPACK_SIMD
     ggml_gemv_mxfp4_4x4_q8_0_generic(n, r.generic.data(), 0, packed.data(), yq.data(), 1, nc);
+#else
+    // No distinct generic symbol on this target; the simd result IS the
+    // generic one. Copying makes that explicit rather than leaving zeros that
+    // would read as a divergence.
+    r.generic = r.simd;
+#endif
 
     // Per-row plain dot product: the strongest check on this surface, because
     // it makes the interleaving falsifiable with no reference of ours involved.
@@ -254,7 +265,11 @@ GemmResult run_mxfp4_gemm(const std::vector<std::vector<float>>& wrows,
     r.simd.assign((size_t)nr*nc, 0.0f);
     r.generic.assign((size_t)nr*nc, 0.0f);
     ggml_gemm_mxfp4_4x4_q8_0        (n, r.simd.data(),    (size_t)nc, packed.data(), aq.data(), nr, nc);
+#if DFUZZ_HAS_MXFP4_REPACK_SIMD
     ggml_gemm_mxfp4_4x4_q8_0_generic(n, r.generic.data(), (size_t)nc, packed.data(), aq.data(), nr, nc);
+#else
+    r.generic = r.simd;
+#endif
 
     // Reference-free cross-check: run gemv per activation row on the SAME
     // repacked weights.

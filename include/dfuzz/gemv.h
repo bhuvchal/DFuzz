@@ -5,6 +5,27 @@
 
 namespace dfuzz {
 
+// Which repacked kernels have a distinct SIMD implementation on THIS target.
+//
+// ggml's arch-fallback.h #defines the _generic name onto the plain name when a
+// platform has no native implementation, so the two symbols collapse into one.
+// On x86 that is the case for mxfp4 gemv/gemm: the generic path IS the
+// implementation, and there is no simd-vs-generic axis to test. On arm64 both
+// exist. q4_K 8x8 has a real SIMD path on both.
+//
+// The surface therefore differs by architecture, and a coverage claim that did
+// not say so would be wrong. Reported in the results rather than assumed.
+#if defined(__aarch64__) || defined(_M_ARM64)
+  #define DFUZZ_HAS_MXFP4_REPACK_SIMD 1
+#else
+  #define DFUZZ_HAS_MXFP4_REPACK_SIMD 0
+#endif
+
+// True when simd and generic are genuinely distinct symbols for this family.
+bool mxfp4_repack_has_simd();
+bool q4_K_repack_has_simd();
+
+
 // --- Repacked (interleaved) weight kernels --------------------------------
 // gemv/gemm take weights pre-interleaved across several rows so the SIMD path
 // can produce multiple output columns at once. That interleaving is pure index

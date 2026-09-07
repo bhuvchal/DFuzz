@@ -60,6 +60,16 @@ void print_build_config() {
                 ggml_cpu_has_neon(), ggml_cpu_has_dotprod(), ggml_cpu_has_matmul_int8(),
                 ggml_cpu_has_sve(), ggml_cpu_has_avx2(), ggml_cpu_has_avx512(),
                 ggml_cpu_has_f16c());
+    // Which repacked kernels actually have a distinct SIMD path here. On x86
+    // ggml aliases mxfp4 gemv/gemm _generic onto the plain name, so that
+    // comparison axis does not exist -- the coverage claim must say so.
+    std::printf("#   repack simd   : mxfp4=%s q4_K=%s\n",
+#if defined(__aarch64__) || defined(_M_ARM64)
+                "yes", "yes"
+#else
+                "no (generic is the implementation)", "yes"
+#endif
+    );
     std::fflush(stdout);
 }
 
