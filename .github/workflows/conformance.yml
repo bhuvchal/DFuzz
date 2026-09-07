@@ -142,7 +142,7 @@ jobs:
             -I third_party/llama.cpp/ggml/src/ggml-cpu \
             repro/q6k_x86.c -o /tmp/q6k \
             build/third_party/llama.cpp/ggml/src/libggml-cpu.a \
-            build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -lstdc++
+            build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -lstdc++ -fopenmp
           /tmp/q6k
 
       - name: shrink q6_K divergence

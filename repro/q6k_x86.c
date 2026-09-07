@@ -8,7 +8,8 @@
 //      -I third_party/llama.cpp/ggml/src/ggml-cpu \
 //      repro/q6k_x86.c -o /tmp/q6k \
 //      build/third_party/llama.cpp/ggml/src/libggml-cpu.a \
-//      build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -lstdc++
+//      build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -lstdc++ -fopenmp
+// (drop -fopenmp on macOS, where ggml does not link it)
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
