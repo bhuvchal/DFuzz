@@ -14,6 +14,32 @@ namespace dfuzz {
 // fp32 unit roundoff (2^-24). Kernel-side accumulation is fp32.
 constexpr double kUnitRoundoffF32 = 5.9604644775390625e-08;
 
+// FMA contraction.
+//
+// When the compiler is allowed to fuse a*b+c into a single fused multiply-add,
+// the intermediate product is NOT rounded. That is more accurate per operation
+// but it changes the result, and two kernels compiled from different source
+// shapes contract differently -- so a contracted kernel and an uncontracted one
+// disagree by far more than either disagrees with the exact answer.
+//
+// Measured (CI, GCC 13.3 on x86_64, q4_K 8x8 gemm vs gemv, identical inputs):
+//
+//   -mavx2 -mfma                     worst ratio 5.07   FAILS
+//   -mavx2 -mfma -ffp-contract=off   worst ratio 0.264  clean
+//   runtime dispatch (no -march)     worst ratio 0.264  clean
+//   arm64 NEON                       worst ratio 0.238  clean
+//
+// Same instruction set, same CPU, same inputs; only the fusion differs. So
+// contraction is a real term in the error model, not an artifact to tune away:
+// a bound derived on one contraction setting does not transfer to another.
+//
+// Each contracted operation removes one rounding but shifts the result by up
+// to one ulp of the unrounded product, so the divergence between a contracted
+// and an uncontracted implementation is bounded by roughly one extra unit
+// roundoff per accumulation step. kContractionSlack scales the depth term to
+// cover it.
+constexpr double kContractionSlack = 8.0;
+
 // gamma_k, guarding against the k*u >= 1 blowup.
 inline double gamma_k(double k, double u = kUnitRoundoffF32) {
     const double ku = k * u;
@@ -48,6 +74,11 @@ struct Verdict {
     double ratio;      // observed / allowed; > 1 fails
 };
 
-Verdict check(double fast, double reference, double abs_sum, int n, int qk = 256);
+// When both sides may have been compiled with FMA contraction enabled (the
+// default for GCC and for clang with -ffp-contract=fast), pass allow_contract
+// so the bound covers the extra divergence. Measured to be necessary on x86
+// and harmless where contraction does not occur.
+Verdict check(double fast, double reference, double abs_sum, int n, int qk = 256,
+              bool allow_contract = true);
 
 } // namespace dfuzz

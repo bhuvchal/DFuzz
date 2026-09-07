@@ -3,11 +3,15 @@
 
 namespace dfuzz {
 
-Verdict check(double fast, double reference, double abs_sum, int n, int qk) {
+Verdict check(double fast, double reference, double abs_sum, int n, int qk,
+              bool allow_contract) {
     const double depth = effective_depth_blocked(n, qk);
 
-    // Accumulation error, proportional to sum|x_i y_i|.
-    double allowed = gamma_k(depth) * abs_sum;
+    // Accumulation error, proportional to sum|x_i y_i|. Contraction widens
+    // this: a fused and an unfused implementation of the same arithmetic
+    // disagree by more than either disagrees with the exact result.
+    const double eff_depth = allow_contract ? depth * kContractionSlack : depth;
+    double allowed = gamma_k(eff_depth) * abs_sum;
 
     // The kernel returns fp32, so the result carries one final rounding of the
     // true value regardless of how it was accumulated. Without this term, cases
