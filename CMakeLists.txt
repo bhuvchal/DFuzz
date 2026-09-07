@@ -27,7 +27,7 @@ add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 add_library(dfuzz_core STATIC
   src/reference.cpp src/bound.cpp src/formats.cpp
   src/buildinfo.cpp src/init.cpp src/oracle.cpp
-  src/shrink.cpp src/generate.cpp)
+  src/shrink.cpp src/generate.cpp src/gemv.cpp)
 target_include_directories(dfuzz_core PUBLIC include)
 target_link_libraries(dfuzz_core PUBLIC ggml-cpu ggml-base)
 
@@ -35,7 +35,7 @@ add_executable(dfuzz_sweep src/sweep.cpp)
 target_link_libraries(dfuzz_sweep PRIVATE dfuzz_core)
 
 enable_testing()
-foreach(t smoke smoke_fp4 dequant_check dequant_fp4 shrink_test bound_sensitivity bench_oracle)
+foreach(t smoke smoke_fp4 dequant_check dequant_fp4 shrink_test bound_sensitivity gemv_test bench_oracle)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE dfuzz_core)
   if(NOT ${t} STREQUAL bench_oracle)

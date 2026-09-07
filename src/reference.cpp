@@ -96,6 +96,41 @@ void dequantize_q8_K(const void* vy, int nblocks, std::vector<double>& out) {
     }
 }
 
+// Sum over sub-blocks of |dmin * min * d8 * sum(q8)|: the magnitude of the
+// offset correction the q4_K kernel forms and rounds in fp32.
+double q4k_offset_magnitude(const void* vx, const void* vy, int nblocks) {
+    struct blk { uint16_t d, dmin; uint8_t scales[12]; uint8_t qs[128]; };
+    struct b8  { float d; int8_t qs[256]; int16_t bsums[16]; };
+    const auto* x = static_cast<const blk*>(vx);
+    const auto* y = static_cast<const b8*>(vy);
+
+    auto h2d = [](uint16_t h) {
+        const uint32_t s = (h >> 15) & 1u, e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
+        double v;
+        if (e == 0)        v = (double)m * 5.9604644775390625e-08;
+        else if (e == 0x1F) v = m ? __builtin_nan("") : __builtin_inf();
+        else               v = (1.0 + (double)m / 1024.0) * __builtin_ldexp(1.0, (int)e - 15);
+        return s ? -v : v;
+    };
+
+    double total = 0.0;
+    for (int i = 0; i < nblocks; ++i) {
+        const double dmin = h2d(x[i].dmin);
+        const double d8   = (double)y[i].d;
+        for (int sb = 0; sb < 8; ++sb) {
+            uint8_t mn;
+            if (sb < 4) mn = x[i].scales[sb + 4] & 63;
+            else        mn = (uint8_t)((x[i].scales[sb + 4] >> 4) | ((x[i].scales[sb] >> 6) << 4));
+            int sum8 = 0;
+            for (int k = sb * 32; k < (sb + 1) * 32; ++k) sum8 += y[i].qs[k];
+            const double t = dmin * (double)mn * d8 * (double)sum8;
+            total += t < 0 ? -t : t;
+        }
+    }
+    return total;
+}
+
+
 RefResult reference_dot(const std::vector<double>& x, const std::vector<double>& y) {
     RefResult r{0.0, 0.0, 0.0};
     const size_t n = x.size() < y.size() ? x.size() : y.size();

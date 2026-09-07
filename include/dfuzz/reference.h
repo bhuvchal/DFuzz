@@ -57,4 +57,14 @@ RefResult reference_dot_blocked(const std::vector<double>& x,
                                 const std::vector<double>& y,
                                 int sub_block);
 
+// Magnitude of the offset correction a q4_K kernel forms and rounds in fp32:
+// sum over sub-blocks of |dmin * min * d8 * sum(q8)|.
+//
+// q4_K reconstructs x = d*scale*q - dmin*min, so the kernel builds a large
+// scaled sum, builds a large offset, and subtracts them. sum|x_i y_i| sees
+// only the difference and badly understates what is being rounded -- measured
+// at 30-60x on failing cases. Every q4_K comparison must include this term,
+// which is why it lives here rather than inside one caller.
+double q4k_offset_magnitude(const void* vx, const void* vy, int nblocks);
+
 } // namespace dfuzz
