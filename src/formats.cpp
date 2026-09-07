@@ -92,11 +92,33 @@ void dequantize_q8_0(const void* vy, int nblocks, std::vector<double>& out) {
 }
 
 int accumulation_depth(Format f, int n) {
+    // Depth counts the fp32 operations whose ORDER can differ between
+    // implementations. Integer products accumulate exactly in int32 and
+    // contribute nothing; what counts is where results leave the integer
+    // domain and enter fp32.
     int d = 1;
     switch (f) {
-        case Format::q4_K:  case Format::q6_K: d = n / QK_K;          break;
-        case Format::mxfp4:                    d = n / QK_MXFP4;      break;
-        case Format::nvfp4:                    d = n / QK_NVFP4_SUB;  break;
+        case Format::q4_K:
+            // Per 256-element super-block there are 8 sub-blocks of 32, each
+            // contributing a scaled partial sum AND a separate (dmin * min)
+            // offset correction in fp32. Both are fp32 operations on
+            // large-magnitude intermediates, so the depth is 16 per
+            // super-block, not 1. Measured: a depth-1 model fails on
+            // single-block cases where no cross-block accumulation exists,
+            // which is what exposed this.
+            d = (n / QK_K) * 16;
+            break;
+        case Format::q6_K:
+            // q6_K has no min/offset term, but still applies one fp32 scale
+            // per 16-element group: 16 groups per super-block.
+            d = (n / QK_K) * 16;
+            break;
+        case Format::mxfp4:
+            d = n / QK_MXFP4;      // one fp32 add per 32-element block
+            break;
+        case Format::nvfp4:
+            d = n / QK_NVFP4_SUB;  // one fp32 add per 16-element sub-block
+            break;
     }
     return d > 0 ? d : 1;
 }
@@ -119,6 +141,15 @@ int block_bytes(Format f) {
         case Format::nvfp4: return (int)sizeof(block_nvfp4);
     }
     return 0;
+}
+
+double max_block_magnitude(Format f) {
+    switch (f) {
+        case Format::q4_K:  return 1.2e6;   // measured by bisection
+        case Format::q6_K:  return 7.5e7;   // measured by bisection
+        case Format::mxfp4: case Format::nvfp4: return HUGE_VAL; // exponent scales
+    }
+    return HUGE_VAL;
 }
 
 int block_elems(Format f) {

@@ -55,4 +55,20 @@ const char* format_name(Format f);
 int  block_bytes(Format f);
 int  block_elems(Format f);
 
+// Largest per-block magnitude a format can represent before its stored scale
+// overflows and the block round-trips to NaN/Inf.
+//
+// q4_K and q6_K keep the super-block scale in fp16 (max 65504), so a block
+// whose values exceed roughly that times the quant range cannot be encoded:
+// 1/iscale overflows to inf, and dequantization yields inf*0 = NaN. Measured
+// by bisection, not assumed: q4_K ~1.2e6, q6_K ~7.5e7.
+//
+// mxfp4 and nvfp4 have no such limit -- E8M0 and UE4M3 are exponent-based and
+// track magnitude freely. This is the same property that makes mxfp4's scale
+// multiply exact, showing up as dynamic range.
+//
+// Inputs beyond the limit are OUT OF DOMAIN for the format, not bugs. A
+// generator that produces them manufactures false positives.
+double max_block_magnitude(Format f);
+
 } // namespace dfuzz
