@@ -88,6 +88,17 @@ int main(int argc, char** argv) {
     std::printf("  |generic-ref|/|ref| = %.4e\n",
                 std::fabs(f.generic - f.reference) / std::fabs(f.reference));
 
+    // Sparse form first: after shrinking almost everything is zero, and an
+    // index/value list is what actually goes into a bug report.
+    std::printf("\n# nonzero elements (index = value)\n");
+    std::printf("  x:");
+    for (int i = 0; i < c.n(); ++i)
+        if (c.x[i] != 0.0f) std::printf("  x[%d]=%.9gf;", i, (double)c.x[i]);
+    std::printf("\n  y:");
+    for (int i = 0; i < c.n(); ++i)
+        if (c.y[i] != 0.0f) std::printf("  y[%d]=%.9gf;", i, (double)c.y[i]);
+    std::printf("\n");
+
     // Literal values, so the reproducer is self-contained.
     std::printf("\n# reproducer (%s, n=%d)\n", format_name(c.fmt), c.n());
     std::printf("static const float x[%d] = {", c.n());
