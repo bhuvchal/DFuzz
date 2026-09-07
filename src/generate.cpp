@@ -5,6 +5,43 @@
 #include <vector>
 
 namespace dfuzz {
+namespace {
+
+// std::mt19937_64 is specified exactly by the standard, but the DISTRIBUTIONS
+// are not: normal_distribution and uniform_real_distribution may use different
+// algorithms in libstdc++ and libc++, so the same seed yields different values
+// on different platforms.
+//
+// That silently broke the cross-path comparison -- two builds were never
+// running the same inputs, and a divergence between them meant nothing. It
+// also produced phantom findings on x86 that could not be reproduced on arm64
+// from the same seed.
+//
+// These generate values from the engine directly, so a seed denotes the same
+// input everywhere.
+
+// Uniform in [-1, 1), from the top 24 bits (fp32 has 24 significand bits).
+float portable_uniform(std::mt19937_64& rng) {
+    const uint32_t bits = (uint32_t)(rng() >> 40);          // 24 bits
+    return (float)((double)bits / 8388608.0 - 1.0);         // /2^23 - 1
+}
+
+// Standard normal via Box-Muller. Deterministic given the engine, and uses a
+// fixed number of engine draws so the stream stays aligned across platforms.
+float portable_normal(std::mt19937_64& rng) {
+    // Avoid log(0): map to (0,1].
+    const double u1 = ((double)(rng() >> 11) + 1.0) * (1.0 / 9007199254740993.0);
+    const double u2 = ((double)(rng() >> 11)      ) * (1.0 / 9007199254740992.0);
+    return (float)(std::sqrt(-2.0 * std::log(u1)) * std::cos(6.283185307179586 * u2));
+}
+
+// Uniform integer in [lo, hi], inclusive, without std::uniform_int_distribution.
+int portable_int(std::mt19937_64& rng, int lo, int hi) {
+    const uint64_t span = (uint64_t)(hi - lo) + 1u;
+    return lo + (int)(rng() % span);
+}
+
+} // namespace
 
 const char* input_class_name(InputClass c) {
     switch (c) {
@@ -31,12 +68,12 @@ Case generate(const GenSpec& spec) {
     c.y.assign(n, 0.0f);
 
     std::mt19937_64 rng(spec.seed);
-    std::uniform_real_distribution<float> u(-1.0f, 1.0f);
-    std::normal_distribution<float>       g(0.0f, 1.0f);
+    auto u = [&rng]{ return portable_uniform(rng); };
+    auto g = [&rng]{ return portable_normal(rng); };
 
     switch (spec.cls) {
         case InputClass::Uniform:
-            for (int i = 0; i < n; ++i) { c.x[i] = u(rng); c.y[i] = u(rng); }
+            for (int i = 0; i < n; ++i) { c.x[i] = u(); c.y[i] = u(); }
             break;
 
         case InputClass::Cancellation: {
@@ -46,7 +83,7 @@ Case generate(const GenSpec& spec) {
             // relative-to-result error explodes with no bug present, and the
             // reason the bound is expressed against abs_sum.
             for (int i = 0; i + 1 < n; i += 2) {
-                const float a = g(rng), b = g(rng);
+                const float a = g(), b = g();
                 c.x[i] = a;      c.y[i] = b;
                 c.x[i+1] = a;    c.y[i+1] = -b;
             }
@@ -54,40 +91,35 @@ Case generate(const GenSpec& spec) {
         }
 
         case InputClass::MixedMagnitude: {
-            std::uniform_int_distribution<int> e(-30, 30);
             for (int i = 0; i < n; ++i) {
-                c.x[i] = std::ldexp(g(rng), e(rng));
-                c.y[i] = std::ldexp(g(rng), e(rng));
+                c.x[i] = std::ldexp(g(), portable_int(rng, -30, 30));
+                c.y[i] = std::ldexp(g(), portable_int(rng, -30, 30));
             }
             break;
         }
 
         case InputClass::Denormal: {
-            std::uniform_int_distribution<int> s(0, 1);
             const float tiny = std::numeric_limits<float>::denorm_min();
-            std::uniform_int_distribution<int> mult(1, 1000);
             for (int i = 0; i < n; ++i) {
-                c.x[i] = (s(rng) ? 1.f : -1.f) * tiny * (float)mult(rng);
-                c.y[i] = (s(rng) ? 1.f : -1.f) * tiny * (float)mult(rng);
+                c.x[i] = (portable_int(rng,0,1) ? 1.f : -1.f) * tiny * (float)portable_int(rng,1,1000);
+                c.y[i] = (portable_int(rng,0,1) ? 1.f : -1.f) * tiny * (float)portable_int(rng,1,1000);
             }
             break;
         }
 
         case InputClass::SignedZero: {
-            std::uniform_int_distribution<int> s(0, 2);
             for (int i = 0; i < n; ++i) {
-                const int a = s(rng), b = s(rng);
-                c.x[i] = a == 0 ? 0.0f : (a == 1 ? -0.0f : g(rng));
-                c.y[i] = b == 0 ? 0.0f : (b == 1 ? -0.0f : g(rng));
+                const int a = portable_int(rng,0,2), b = portable_int(rng,0,2);
+                c.x[i] = a == 0 ? 0.0f : (a == 1 ? -0.0f : g());
+                c.y[i] = b == 0 ? 0.0f : (b == 1 ? -0.0f : g());
             }
             break;
         }
 
         case InputClass::PowerOfTwo: {
-            std::uniform_int_distribution<int> e(-10, 10), s(0, 1);
             for (int i = 0; i < n; ++i) {
-                c.x[i] = std::ldexp(s(rng) ? 1.f : -1.f, e(rng));
-                c.y[i] = std::ldexp(s(rng) ? 1.f : -1.f, e(rng));
+                c.x[i] = std::ldexp(portable_int(rng,0,1) ? 1.f : -1.f, portable_int(rng,-10,10));
+                c.y[i] = std::ldexp(portable_int(rng,0,1) ? 1.f : -1.f, portable_int(rng,-10,10));
             }
             break;
         }
@@ -97,7 +129,7 @@ Case generate(const GenSpec& spec) {
             // rest toward zero. Exercises the encoder's saturation path and
             // the resulting all-but-one-zero block in the kernel.
             const int be = block_elems(spec.fmt);
-            for (int i = 0; i < n; ++i) { c.x[i] = g(rng) * 1e-3f; c.y[i] = g(rng); }
+            for (int i = 0; i < n; ++i) { c.x[i] = g() * 1e-3f; c.y[i] = g(); }
             for (int b = 0; b < spec.blocks; ++b) c.x[b * be] = 1e4f;
             break;
         }
@@ -114,8 +146,7 @@ Case generate(const GenSpec& spec) {
         }
 
         case InputClass::SingleSpike: {
-            std::uniform_int_distribution<int> pos(0, n - 1);
-            const int p = pos(rng);
+            const int p = portable_int(rng, 0, n - 1);
             c.x[p] = 1.0f; c.y[p] = 1.0f;
             break;
         }
