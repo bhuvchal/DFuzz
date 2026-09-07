@@ -98,6 +98,13 @@ jobs:
       # --emit writes every kernel result as data. The seed set is identical
       # across builds, so the cross-path job can compare AVX2 against AVX-512
       # against NEON directly.
+      # Diagnostic for the x86 avx2 gemm divergence: same packed weights fed
+      # to gemm-simd, gemm-generic and gemv, so the three can be separated.
+      - name: gemm diagnostic
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: ./build/diag_gemm
+
       - name: Conformance sweep
         if: steps.cpu.outputs.supported == 'yes'
         run: ./build/dfuzz_sweep --seeds 64 --emit results-${{ matrix.name }}.tsv
