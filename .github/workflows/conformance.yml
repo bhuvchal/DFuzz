@@ -140,6 +140,20 @@ jobs:
         continue-on-error: true
         run: ./build/derive_q6k
 
+      # The regression test as it would be submitted upstream: must FAIL on
+      # x86 AVX2 today and pass everywhere else.
+      - name: q6_K regression test
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: |
+          c++ -std=c++17 -O2 ${{ matrix.cflags }} \
+            -I third_party/llama.cpp/ggml/include \
+            -I third_party/llama.cpp/ggml/src \
+            repro/test-q6k-precision.cpp -o /tmp/tq6k \
+            build/third_party/llama.cpp/ggml/src/libggml-cpu.a \
+            build/third_party/llama.cpp/ggml/src/libggml-base.a -lm -fopenmp
+          /tmp/tq6k && echo "test PASSED" || echo "test FAILED (expected on x86 AVX2)"
+
       - name: standalone reproducer
         if: steps.cpu.outputs.supported == 'yes'
         continue-on-error: true
