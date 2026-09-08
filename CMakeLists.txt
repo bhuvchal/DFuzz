@@ -31,6 +31,9 @@ add_library(dfuzz_core STATIC
 target_include_directories(dfuzz_core PUBLIC include)
 target_link_libraries(dfuzz_core PUBLIC ggml-cpu ggml-base)
 
+add_executable(derive_q6k tools/derive_q6k.cpp)
+target_link_libraries(derive_q6k PRIVATE dfuzz_core)
+
 add_executable(shrink_case tools/shrink_case.cpp)
 target_link_libraries(shrink_case PRIVATE dfuzz_core)
 

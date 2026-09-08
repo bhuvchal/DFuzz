@@ -132,6 +132,14 @@ jobs:
       # the case does not fail on arm64 at all, so it cannot be shrunk locally.
       # Standalone reproducer: llama.cpp functions only, none of this harness.
       # If this diverges, the finding does not depend on anything we wrote.
+      # Dump the exact quantized state on THIS platform. The derivation was
+      # done from an arm64 dump; if x86 quantizes differently the premise
+      # changes, so it must be confirmed here rather than assumed.
+      - name: derivation state
+        if: steps.cpu.outputs.supported == 'yes'
+        continue-on-error: true
+        run: ./build/derive_q6k
+
       - name: standalone reproducer
         if: steps.cpu.outputs.supported == 'yes'
         continue-on-error: true
